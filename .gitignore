@@ -28,3 +28,8 @@
 *.out
 *.app
 */x64
+
+# Project configs #
+/MyDemo
+!*.cpp
+!*.h
