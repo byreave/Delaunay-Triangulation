@@ -12,11 +12,13 @@
 #include "Mesh\iterators.h"
 #include "Parser\parser.h"
 
+#include "Eigen\Dense"
 #include <math.h>
 #ifndef M_PI
 #define M_PI 3.141592653589793238
 #endif
 
+using Eigen::MatrixXd;
 namespace MeshLib
 {
 	class CMyVertex;
@@ -140,6 +142,13 @@ namespace MeshLib
 		void test_iterator();
 		double cosine_law(double a, double b, double c);
 		void verify_gauss_bonnet();
+		void edge_swap(E * e);
+		void face_split(F * f, V * v);
+		double triangle_space(V * v1, V * v2, V * v3);
+		bool barycentric_coordinate(H * f, V * v);
+		F * locate_face(V * v);
+		bool outside_circle(V * a, V * b, V * c, V * v);
+		bool legalize_edge(V * v, E * e);
 	};
 
 	typedef MyMesh<CMyVertex, CMyEdge, CMyFace, CMyHalfEdge> CMyMesh;
@@ -313,6 +322,164 @@ namespace MeshLib
 		}
 		std::cout <<"Equation left = "<< result << std::endl;
 		std::cout << "2 PI multiply Euler Characteristic = " << 2 * M_PI * euler_char << std::endl;
+	}
+	/*
+	swap edge cwly
+	*/
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::edge_swap(E * e)
+	{
+		//get two halfedges of the edge
+		H * h1 = (H *)e->halfedge(0);
+		H * h2 = (H *)e->halfedge(1);
+		//get two vertexes of the edge
+		V * v1 = (V *)h1->source();
+		V * v2 = (V *)h1->target();
+		V * v3 = (V *)h1->he_next()->target();
+		V * v4 = (V *)h2->he_next()->target();
+		//changes on faces
+		F * f1 = (F *)h1->face();
+		if (faceHalfedge(f1) == h1->he_prev()) //if halfedge on the face needs changing
+		{
+			f1->halfedge() = h1; //simply set to h1
+		}
+		F * f2 = (F *)h2->face();
+		if (faceHalfedge(f2) == h1->he_prev()) //if halfedge on the face needs changing
+		{
+			f2->halfedge() = h2; //simply set to h2
+		}
+		//changes on halfedges
+		//target vertex on halfedges
+		h1->vertex() = h2->he_next()->vertex();
+		h2->vertex() = h1->he_next()->vertex(); //note that next pointer has not been changed yet
+		//next & prev
+		H * h1_next = (H *)h1->he_next();
+		H * h1_prev = (H *)h1->he_prev();
+		H * h2_next = (H *)h2->he_next();
+		H * h2_prev = (H *)h2->he_prev();
+
+		h1->he_next() = h2_prev;
+		h1->he_prev() = h1_next;
+		h2->he_next() = h1_prev;
+		h2->he_prev() = h2_next;
+
+		h1_next->he_next() = h1;
+		h1_next->he_prev() = h2_prev;
+		h1_prev->he_next() = h2_next;
+		h1_prev->he_prev() = h2;
+		
+		h2_next->he_next() = h2;
+		h2_next->he_prev() = h1_prev;
+		h2_prev->he_next() = h1_next;
+		h2_prev->he_prev() = h1;
+		//faces
+		h1_prev->face() = h2->face();
+		h2_prev->face() = h1->face();
+
+		//changes on vertexes
+		//m_edges
+		std::list<CEdge *> * tmpList = (v1->id() < v2->id()) ? v2->edges() : v1->edges();
+		tmpList->remove(h1->edge());
+
+		tmpList = (v3->id() < v4->id()) ? v4->edges() : v3->edges();
+		tmpList->push_back(h1->edge());
+
+		//halfedge
+		if ((H *)v2->halfedge() == h1) v2->halfedge() = h2_prev;
+		if ((H *)v1->halfedge() == h2) v1->halfedge() = h1_prev;
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::face_split(F * f, V * v)
+	{
+		for (FaceHalfedgeIterator fhiter(F); !fhiter.end(); ++fhiter)
+		{
+			H * Hp = *fhiter;
+			V * varr[3] = { Hp->source(), Hp->target(), v };
+			createFace(varr, numFaces() + 1);
+		}
+		deleteFace(f);
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	double MeshLib::MyMesh<V, E, F, H>::triangle_space(V * a, V * b, V * c)
+	{
+		MatrixXd mat(3, 3);
+		mat << a->point()[0], a->point()[1], 1,
+			b->point()[0], b->point()[1], 1,
+			c->point()[0], c->point()[1], 1;
+		return 0.5 * mat.determinant();
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	bool MyMesh<V, E, F, H>::barycentric_coordinate(H * h, V * v)
+	{
+		return (triangle_space(v, (V *)h->source(), (V *)h->target()) > 0);
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	F * MyMesh<V, E, F, H>::locate_face(V * v)
+	{
+		//Arbitrarily choose one face
+		F * f = (F *)faces()[0];
+		H * h = (H *)f->halfedge();
+		for (;;)
+		{
+			for (int i = 0; i < 3; ++i;) //traverse three halfedges
+			{
+				if (!bartcentric_coordinate(h, v)) //if bartcentric coordinate is nagative
+				{
+					f = (F *)h->he_sym()->face(); //get the face adjacent to the current face sharing h
+					if (NULL == f)
+						return NULL;
+					h = (H *)f->halfedge();
+					break;
+				}
+				else
+				{
+					h = (H *)h->he_next();
+				}
+			}
+			if (i == 3) //if all edges are positive
+				return f;
+		}
+	}
+	//if v is outside the circle through a, b, c
+	template<typename V, typename E, typename F, typename H>
+	bool MyMesh<V, E, F, H>::outside_circle(V * a, V * b, V * c, V * v)
+	{
+		MatrixXd mat(4, 4);
+		mat >> a->point()[0], a->point()[1], a->point()[0] * a->point()[0] + a->point()[1] * a->point()[1], 1,
+			b->point()[0], b->point()[1], b->point()[0] * b->point()[0] + b->point()[1] * b->point()[1], 1,
+			c->point()[0], c->point()[1], c->point()[0] * c->point()[0] + c->point()[1] * c->point()[1], 1,
+			v->point()[0], v->point()[1], v->point()[0] * v->point()[0] + v->point()[1] * v->point()[1], 1;
+		return (mat.determinant() < 0);
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	bool MyMesh<V, E, F, H>::legalize_edge(V * v, E * e)
+	{
+		//get the two vertex of the edge
+		V * v0 = e->halfedge(0)->source();
+		V * v1 = e->halfedge(0)->target();
+		assert(e->halfedge(1) != NULL);
+		V * v2;
+		//find v2 oppsite v
+		if (e->halfedge(0)->he_next()->target() == v)
+		{
+			v2 = e->halfedge(1)->he_next()->target();
+		}
+		else
+		{
+			v2 = e->halfedge(0)->he_next()->target();
+		}
+		if (outside_circle(v0, v1, v, v2))
+		{
+			return false;
+		}
+		legalize_edge(v, vertexEdge(v0, v2));
+		legalize_edge(v, vertexEdge(v1, v2));
+		return true;
 	}
 }
 
