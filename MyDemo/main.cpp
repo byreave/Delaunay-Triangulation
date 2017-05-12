@@ -418,11 +418,70 @@ void init_openGL(int argc, char * argv[])
 	glutMainLoop();                       /* Start GLUT event-processing loop */
 }
 
+//reshape function on 2d mode
+void reshape_2d(GLsizei w, GLsizei h)
+{
+	if (h == 0) {
+		h = 1;
+	}
+	glViewport(0, 0, w, h);
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	if (w <= h) {
+		glOrtho(0.0f, 250.0f, 0.0f, 250.0f*h / w, 1.0f, -1.0f);
+	}
+	else
+	{
+		glOrtho(0.0f, 250.0f*w / h, 0.0f, 250.0f, 1.0f, -1.0f);
+	}
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+}
+
+/*
+draw 2d delaunay triangulation result
+*/
+void draw_2d_mesh()
+{
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	//设置当前绘图使用的颜色
+	glColor3f(0.0f, 0.0f, 0.0f);
+	for (CMyMesh::MeshEdgeIterator meiter(&mesh); !meiter.end(); ++meiter)
+	{
+		CMyEdge * pE = * meiter;
+		CPoint p1 = pE->halfedge(0)->source()->point();
+		CPoint p2 = pE->halfedge(0)->target()->point();
+		GLfloat curSizeLine = 5;
+		glLineWidth(curSizeLine);
+		glBegin(GL_LINES);
+		glVertex3f(p1[0], p1[1], 0.0f);
+		glVertex3f(p2[0], p2[1], 0.0f);
+		glEnd();
+	}
+	glFlush();
+}
+
+void init_openGL_2d(int argc, char * argv[])
+{
+	glutInit(&argc, argv);                /* Initialize GLUT */
+	glutInitDisplayMode(GLUT_RGB | GLUT_SINGLE | GLUT_DEPTH);
+	glutInitWindowSize(800, 600);
+	glutCreateWindow("Mesh Viewer");	  /* Create window with given title */
+	glViewport(0, 0, 800, 600);
+	glutDisplayFunc(draw_2d_mesh);
+	glutReshapeFunc(reshape_2d);
+
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glutMainLoop();
+}
 /*! main function for viewer
 */
 int main(int argc, char * argv[])
 {
-	if (argc != 2)
+	/*if (argc != 2)
 	{
 		std::cout << "Usage: input.m" << std::endl;
 		return -1;
@@ -441,13 +500,16 @@ int main(int argc, char * argv[])
 	{
 		mesh.read_off(mesh_name.c_str());
 	}
+	*/
 
-	normalize_mesh(&mesh);
-	compute_normal(&mesh);
+	//normalize_mesh(&mesh);
+	//compute_normal(&mesh);
 
-	mesh.output_mesh_info();
+	//mesh.output_mesh_info();
 	//mesh.test_iterator();
-	mesh.verify_gauss_bonnet();
-	init_openGL(argc, argv);
+	//mesh.verify_gauss_bonnet();
+	mesh.init_mesh();
+	mesh.generate_mesh(50);
+	init_openGL_2d(argc, argv);
 	return 0;
 }

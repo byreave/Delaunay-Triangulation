@@ -14,8 +14,14 @@
 
 #include "Eigen\Dense"
 #include <math.h>
+#include <time.h>
+#include <stdlib.h>
 #ifndef M_PI
 #define M_PI 3.141592653589793238
+#endif
+
+#ifndef RAN_PRECISION
+#define RAN_PRECISION 9999
 #endif
 
 using Eigen::MatrixXd;
@@ -142,6 +148,7 @@ namespace MeshLib
 		void test_iterator();
 		double cosine_law(double a, double b, double c);
 		void verify_gauss_bonnet();
+		void delete_face_2d(F * f);
 		void edge_swap(E * e);
 		void face_split(F * f, V * v);
 		double triangle_space(V * v1, V * v2, V * v3);
@@ -149,6 +156,10 @@ namespace MeshLib
 		F * locate_face(V * v);
 		bool outside_circle(V * a, V * b, V * c, V * v);
 		bool legalize_edge(V * v, E * e);
+		void insert_vertex(V * v);
+		double get_random();
+		void init_mesh();
+		void generate_mesh(int num);
 	};
 
 	typedef MyMesh<CMyVertex, CMyEdge, CMyFace, CMyHalfEdge> CMyMesh;
@@ -323,6 +334,56 @@ namespace MeshLib
 		std::cout <<"Equation left = "<< result << std::endl;
 		std::cout << "2 PI multiply Euler Characteristic = " << 2 * M_PI * euler_char << std::endl;
 	}
+
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::delete_face_2d(F * f)
+	{
+		std::map<int, tFace>::iterator fiter = m_map_face.find(f->id());
+		if (fiter != m_map_face.end())
+		{
+			m_map_face.erase(fiter);
+		}
+		m_faces.remove(f);
+
+		H * pH = (H *)f->halfedge();
+		E * pE = (E *)pH->edge();
+
+		for (int i = 0; i < 3; ++i) //set edge's halfedge to null
+		{
+			if (pE->halfedge(0) == pH)
+			{
+				if (pE->halfedge(1) == NULL) //if both halfedges are set to null, in other words , the edge is on boundary, delete the edge
+				{
+					V * tmpV1 = (V *)pE->halfedge(0)->source();
+					V * tmpV2 = (V *)pE->halfedge(0)->target();
+					std::list<CEdge *>list = (tmpV1->id() > tmpV2->id()) ? tmpV1->edges():tmpV2->edges();
+					std::cout << list.size();
+
+					list.remove(pE->halfedge(0)->edge());
+					std::cout << list.size();
+					m_edges.remove(pE);
+					delete pE;
+				}
+				else
+				{
+					pE->halfedge(0) = pE->halfedge(1);
+					pE->halfedge(1) = NULL;
+				}
+
+			}
+			else
+			{
+				pE->halfedge(1) = NULL;
+			}
+			pH = (H *)pH->he_next();
+			pE = (E *)pH->edge();
+		}
+		delete(f->halfedge()->he_next());
+		delete(f->halfedge()->he_prev());
+		delete(f->halfedge());
+
+		delete f;
+	}
 	/*
 	swap edge cwly
 	*/
@@ -392,13 +453,18 @@ namespace MeshLib
 	template<typename V, typename E, typename F, typename H>
 	void MyMesh<V, E, F, H>::face_split(F * f, V * v)
 	{
-		for (FaceHalfedgeIterator fhiter(F); !fhiter.end(); ++fhiter)
+		V * fvarr[3];//get the three vertexes on face f
+		fvarr[0] = (V *)f->halfedge()->source();
+		fvarr[1] = (V *)f->halfedge()->target();
+		fvarr[2] = (V *)f->halfedge()->he_next()->target();
+
+		delete_face_2d(f); //delete old face
+
+		for (int i = 0; i < 3; ++i) //construct three new faces
 		{
-			H * Hp = *fhiter;
-			V * varr[3] = { Hp->source(), Hp->target(), v };
+			V * varr[3] = { fvarr[i], fvarr[(i + 1) % 3], v };
 			createFace(varr, numFaces() + 1);
 		}
-		deleteFace(f);
 	}
 
 	template<typename V, typename E, typename F, typename H>
@@ -414,20 +480,21 @@ namespace MeshLib
 	template<typename V, typename E, typename F, typename H>
 	bool MyMesh<V, E, F, H>::barycentric_coordinate(H * h, V * v)
 	{
-		return (triangle_space(v, (V *)h->source(), (V *)h->target()) > 0);
+		return ((triangle_space(v, (V *)h->source(), (V *)h->target()) / triangle_space((V *)h->source(), (V *)h->target(), (V *) h->he_next()->target())) > 0);
 	}
 
 	template<typename V, typename E, typename F, typename H>
 	F * MyMesh<V, E, F, H>::locate_face(V * v)
 	{
 		//Arbitrarily choose one face
-		F * f = (F *)faces()[0];
+		F * f = (F *)*faces().begin();
 		H * h = (H *)f->halfedge();
 		for (;;)
 		{
-			for (int i = 0; i < 3; ++i;) //traverse three halfedges
+			int i;
+			for (i = 0; i < 3; ++i) //traverse three halfedges
 			{
-				if (!bartcentric_coordinate(h, v)) //if bartcentric coordinate is nagative
+				if (!barycentric_coordinate(h, v)) //if bartcentric coordinate is nagative
 				{
 					f = (F *)h->he_sym()->face(); //get the face adjacent to the current face sharing h
 					if (NULL == f)
@@ -449,7 +516,7 @@ namespace MeshLib
 	bool MyMesh<V, E, F, H>::outside_circle(V * a, V * b, V * c, V * v)
 	{
 		MatrixXd mat(4, 4);
-		mat >> a->point()[0], a->point()[1], a->point()[0] * a->point()[0] + a->point()[1] * a->point()[1], 1,
+		mat << a->point()[0], a->point()[1], a->point()[0] * a->point()[0] + a->point()[1] * a->point()[1], 1,
 			b->point()[0], b->point()[1], b->point()[0] * b->point()[0] + b->point()[1] * b->point()[1], 1,
 			c->point()[0], c->point()[1], c->point()[0] * c->point()[0] + c->point()[1] * c->point()[1], 1,
 			v->point()[0], v->point()[1], v->point()[0] * v->point()[0] + v->point()[1] * v->point()[1], 1;
@@ -459,19 +526,21 @@ namespace MeshLib
 	template<typename V, typename E, typename F, typename H>
 	bool MyMesh<V, E, F, H>::legalize_edge(V * v, E * e)
 	{
+		if (e->boundary())
+			return true;
 		//get the two vertex of the edge
-		V * v0 = e->halfedge(0)->source();
-		V * v1 = e->halfedge(0)->target();
+		V * v0 = (V *)e->halfedge(0)->source();
+		V * v1 = (V *)e->halfedge(0)->target();
 		assert(e->halfedge(1) != NULL);
 		V * v2;
 		//find v2 oppsite v
 		if (e->halfedge(0)->he_next()->target() == v)
 		{
-			v2 = e->halfedge(1)->he_next()->target();
+			v2 = (V *)e->halfedge(1)->he_next()->target();
 		}
 		else
 		{
-			v2 = e->halfedge(0)->he_next()->target();
+			v2 = (V *)e->halfedge(0)->he_next()->target();
 		}
 		if (outside_circle(v0, v1, v, v2))
 		{
@@ -481,6 +550,81 @@ namespace MeshLib
 		legalize_edge(v, vertexEdge(v1, v2));
 		return true;
 	}
+
+	//insert a vertex
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::insert_vertex(V * v)
+	{
+		F * Fp = locate_face(v);
+		V * v1 = (V *)Fp->halfedge()->source();
+		V * v2 = (V *)Fp->halfedge()->target();
+		face_split(Fp, v);
+		//because the three original halfedges have been deleted, we get them by vertex
+		H * Hp = vertexHalfedge(v1, v2);
+		legalize_edge(v, (E *)Hp->edge());
+		Hp = (H *)Hp->he_next()->he_sym()->he_next(); //second halfedge of Fp
+		legalize_edge(v, (E *)Hp->edge());
+		Hp = (H *)Hp->he_next()->he_sym()->he_next(); //third halfedge of Fp
+		legalize_edge(v, (E *)Hp->edge());
+	}
+
+	/*
+	get a random number between -1 and 1
+	*/
+	template<typename V, typename E, typename F, typename H>
+	inline double  MyMesh<V, E, F, H>::get_random()
+	{
+		int r = rand() % (RAN_PRECISION + 1);
+		r -= ((RAN_PRECISION + 1) / 2);
+
+		return r /(0.5 * (double)(RAN_PRECISION + 1));
+	}
+
+	/*
+	init the first large face 
+	*/
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::init_mesh()
+	{
+		// first large face  value choose arbitrarily
+		CPoint p1, p2, p3;
+		p1[0] = 0.103, p1[1] = 2.970;
+		p2[0] = -2.402, p2[1] = -1.051;
+		p3[0] = 2.511, p3[1] = 1.032;
+
+		V * varr[3];
+		varr[0] = createVertex(1);
+		varr[0]->point() = p1;
+		varr[1] = createVertex(2);
+		varr[1]->point() = p2;
+		varr[2] = createVertex(3);
+		varr[2]->point() = p3;
+
+		createFace(varr, 1);
+	}
+	/*
+	generate a mesh with num vertexes
+	*/
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::generate_mesh(int num)
+	{
+		int id = 4;
+		for (int i = 0; i < num; ++i)
+		{
+			CPoint p;
+			for (int j = 0; j < 2; ++j)
+			{
+				p[j] = get_random();
+			}
+			p[2] = 0;
+			id = i + 4;
+			V * pV = createVertex(id);
+			pV->point() = p;
+
+			insert_vertex(pV);
+		}
+	}
+
 }
 
 
