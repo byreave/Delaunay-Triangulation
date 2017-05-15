@@ -30,6 +30,7 @@
 */x64
 
 # Project configs #
-/MyDemo
-!*.cpp
-!*.h
+*.args.json
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
