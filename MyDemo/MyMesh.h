@@ -359,10 +359,13 @@ namespace MeshLib
 					std::list<CEdge *>list = (tmpV1->id() > tmpV2->id()) ? tmpV1->edges():tmpV2->edges();
 					std::cout << list.size();
 
-					list.remove(pE->halfedge(0)->edge());
+					list.remove(pE);
 					std::cout << list.size();
 					m_edges.remove(pE);
+					delete pE->halfedge(0);
+					pE->halfedge(0) = NULL;
 					delete pE;
+					pE = NULL;
 				}
 				else
 				{
@@ -378,9 +381,6 @@ namespace MeshLib
 			pH = (H *)pH->he_next();
 			pE = (E *)pH->edge();
 		}
-		delete(f->halfedge()->he_next());
-		delete(f->halfedge()->he_prev());
-		delete(f->halfedge());
 
 		delete f;
 	}
