@@ -160,6 +160,10 @@ namespace MeshLib
 		double get_random();
 		void init_mesh();
 		void generate_mesh(int num);
+		E * edgeExist(V * v1, V * v2);
+		E * create_edge_2d(V * v1, V * v2);
+		F * create_face_2d(V * varr[3], int id, H * pH);
+		void test();
 	};
 
 	typedef MyMesh<CMyVertex, CMyEdge, CMyFace, CMyHalfEdge> CMyMesh;
@@ -345,43 +349,6 @@ namespace MeshLib
 		}
 		m_faces.remove(f);
 
-		H * pH = (H *)f->halfedge();
-		E * pE = (E *)pH->edge();
-
-		for (int i = 0; i < 3; ++i) //set edge's halfedge to null
-		{
-			if (pE->halfedge(0) == pH)
-			{
-				if (pE->halfedge(1) == NULL) //if both halfedges are set to null, in other words , the edge is on boundary, delete the edge
-				{
-					V * tmpV1 = (V *)pE->halfedge(0)->source();
-					V * tmpV2 = (V *)pE->halfedge(0)->target();
-					std::list<CEdge *>list = (tmpV1->id() > tmpV2->id()) ? tmpV1->edges():tmpV2->edges();
-					std::cout << list.size();
-
-					list.remove(pE);
-					std::cout << list.size();
-					m_edges.remove(pE);
-					delete pE->halfedge(0);
-					pE->halfedge(0) = NULL;
-					delete pE;
-					pE = NULL;
-				}
-				else
-				{
-					pE->halfedge(0) = pE->halfedge(1);
-					pE->halfedge(1) = NULL;
-				}
-
-			}
-			else
-			{
-				pE->halfedge(1) = NULL;
-			}
-			pH = (H *)pH->he_next();
-			pE = (E *)pH->edge();
-		}
-
 		delete f;
 	}
 	/*
@@ -390,6 +357,7 @@ namespace MeshLib
 	template<typename V, typename E, typename F, typename H>
 	void MyMesh<V, E, F, H>::edge_swap(E * e)
 	{
+		//std::cout << "234" << std::endl;
 		//get two halfedges of the edge
 		H * h1 = (H *)e->halfedge(0);
 		H * h2 = (H *)e->halfedge(1);
@@ -439,11 +407,11 @@ namespace MeshLib
 
 		//changes on vertexes
 		//m_edges
-		std::list<CEdge *> * tmpList = (v1->id() < v2->id()) ? v2->edges() : v1->edges();
-		tmpList->remove(h1->edge());
+		std::list<CEdge *> & tmpList = (v1->id() < v2->id()) ? v2->edges() : v1->edges();
+		tmpList.remove(h1->edge());
 
 		tmpList = (v3->id() < v4->id()) ? v4->edges() : v3->edges();
-		tmpList->push_back(h1->edge());
+		tmpList.push_back(h1->edge());
 
 		//halfedge
 		if ((H *)v2->halfedge() == h1) v2->halfedge() = h2_prev;
@@ -458,12 +426,24 @@ namespace MeshLib
 		fvarr[1] = (V *)f->halfedge()->target();
 		fvarr[2] = (V *)f->halfedge()->he_next()->target();
 
+		H * fharr[3]; //three old halfedges on face f
+		fharr[0] = (H *)f->halfedge();
+		fharr[1] = (H *)fharr[0]->he_next();
+		fharr[2] = (H *)fharr[1]->he_next();
+
 		delete_face_2d(f); //delete old face
 
 		for (int i = 0; i < 3; ++i) //construct three new faces
 		{
-			V * varr[3] = { fvarr[i], fvarr[(i + 1) % 3], v };
-			createFace(varr, numFaces() + 1);
+			int id = 0;
+			V * varr[3] = { v, fvarr[i], fvarr[(i+1)%3]};
+			for (auto it = m_faces.begin(); it != m_faces.end(); ++ it)
+			{
+				F * tmpF = *it;
+				id = tmpF->id();
+			}
+			create_face_2d(varr, id + 1, fharr[i]);
+			//std::cout << varr[1]->id() << std::endl;
 		}
 	}
 
@@ -494,8 +474,15 @@ namespace MeshLib
 			int i;
 			for (i = 0; i < 3; ++i) //traverse three halfedges
 			{
-				if (!barycentric_coordinate(h, v)) //if bartcentric coordinate is nagative
+				bool flag = barycentric_coordinate(h, v);
+				if (!flag) //if bartcentric coordinate is nagative
 				{
+					if (h->he_sym() == NULL) //on the boundary
+					{
+						h = (H *)h->he_next();
+						continue;
+					}
+
 					f = (F *)h->he_sym()->face(); //get the face adjacent to the current face sharing h
 					if (NULL == f)
 						return NULL;
@@ -514,13 +501,25 @@ namespace MeshLib
 	//if v is outside the circle through a, b, c
 	template<typename V, typename E, typename F, typename H>
 	bool MyMesh<V, E, F, H>::outside_circle(V * a, V * b, V * c, V * v)
-	{
-		MatrixXd mat(4, 4);
-		mat << a->point()[0], a->point()[1], a->point()[0] * a->point()[0] + a->point()[1] * a->point()[1], 1,
+	{ 
+		static int i = 0;
+		MatrixXd * mat = new MatrixXd(4, 4);
+		*mat << a->point()[0], a->point()[1], a->point()[0] * a->point()[0] + a->point()[1] * a->point()[1], 1,
 			b->point()[0], b->point()[1], b->point()[0] * b->point()[0] + b->point()[1] * b->point()[1], 1,
 			c->point()[0], c->point()[1], c->point()[0] * c->point()[0] + c->point()[1] * c->point()[1], 1,
 			v->point()[0], v->point()[1], v->point()[0] * v->point()[0] + v->point()[1] * v->point()[1], 1;
-		return (mat.determinant() < 0);
+		//std::cout <<i<<' '<<"vid:"<<c->id()<<' '<<"v2id "<<v->id()<< mat->determinant() << std::endl;
+		i++;
+		if (mat->determinant() < 0)
+		{
+			delete mat;
+			return true;
+		}
+		else
+		{
+			delete mat;
+			return false;
+		}
 	}
 
 	template<typename V, typename E, typename F, typename H>
@@ -542,12 +541,23 @@ namespace MeshLib
 		{
 			v2 = (V *)e->halfedge(0)->he_next()->target();
 		}
-		if (outside_circle(v0, v1, v, v2))
+		if (e->halfedge(0)->he_next()->target() != v)
 		{
-			return false;
+			if (outside_circle(v, v1, v0, v2))
+				return false;
 		}
-		legalize_edge(v, vertexEdge(v0, v2));
-		legalize_edge(v, vertexEdge(v1, v2));
+		else
+		{
+			if (outside_circle(v0, v1, v, v2))
+			{
+				return false;
+			}
+		}
+		
+		//std::cout << "123" << std::endl;
+		edge_swap(e);
+		legalize_edge(v, edgeExist(v1, v2));
+		legalize_edge(v, edgeExist(v0, v2));
 		return true;
 	}
 
@@ -555,17 +565,14 @@ namespace MeshLib
 	template<typename V, typename E, typename F, typename H>
 	void MyMesh<V, E, F, H>::insert_vertex(V * v)
 	{
-		F * Fp = locate_face(v);
-		V * v1 = (V *)Fp->halfedge()->source();
-		V * v2 = (V *)Fp->halfedge()->target();
-		face_split(Fp, v);
-		//because the three original halfedges have been deleted, we get them by vertex
-		H * Hp = vertexHalfedge(v1, v2);
-		legalize_edge(v, (E *)Hp->edge());
-		Hp = (H *)Hp->he_next()->he_sym()->he_next(); //second halfedge of Fp
-		legalize_edge(v, (E *)Hp->edge());
-		Hp = (H *)Hp->he_next()->he_sym()->he_next(); //third halfedge of Fp
-		legalize_edge(v, (E *)Hp->edge());
+		F * pF = locate_face(v);
+		//std::cout << pF->id() << std::endl;
+		//store 3 original halfedges. they are not deleted after face_split
+		H * fharr[3] = { (H *)pF->halfedge(), (H *)pF->halfedge()->he_next(), (H *)pF->halfedge()->he_next()->he_next() };
+		face_split(pF, v);
+		legalize_edge(v, (E *)fharr[0]->edge());
+		legalize_edge(v, (E *)fharr[1]->edge());
+		legalize_edge(v, (E *)fharr[2]->edge());
 	}
 
 	/*
@@ -590,7 +597,7 @@ namespace MeshLib
 		CPoint p1, p2, p3;
 		p1[0] = 0.103, p1[1] = 2.970;
 		p2[0] = -2.402, p2[1] = -1.051;
-		p3[0] = 2.511, p3[1] = 1.032;
+		p3[0] = 2.511, p3[1] = -1.032;
 
 		V * varr[3];
 		varr[0] = createVertex(1);
@@ -625,6 +632,147 @@ namespace MeshLib
 		}
 	}
 
+	template<typename V, typename E, typename F, typename H>
+	E * MyMesh<V, E, F, H>::create_edge_2d(V * v1, V * v2)
+	{
+		E * pE = edgeExist(v1, v2);
+		if (pE != NULL)
+			return pE;
+		E * e = new E;
+		assert(e != NULL);
+		m_edges.push_back(e);
+		e->id() = (int)m_edges.size();
+
+		V * pV = (v1->id()>v2->id()) ? v1 : v2;
+		std::list<CEdge*> & ledges = (std::list<CEdge*> &) pV->edges();
+
+		ledges.push_back(e);
+
+		return e;
+	}
+
+	/*
+	varr[0] is always the new point
+	and order in this array is ccw
+	pH is the halfedge through varr[1] and varr[2] and it belongs to the old face
+	this method requires special parameters. Thus it's not universal
+	*/
+	template<typename V, typename E, typename F, typename H>
+	F * MyMesh<V, E, F, H>::create_face_2d(V * varr[], int id, H * pH)
+	{
+		F * f = new F();
+		assert(f != NULL);
+		f->id() = id;
+		m_faces.push_back(f);
+		m_map_face.insert(std::pair<int, F*>(id, f));
+
+		//create halfedges
+		CHalfEdge * h1 = new CHalfEdge;
+		assert(h1);
+		h1->vertex() = varr[0];
+		varr[0]->halfedge() = h1;
+
+		CHalfEdge * h2 = new CHalfEdge;
+		assert(h2);
+		h2->vertex() = varr[1];
+		varr[1]->halfedge() = h2;
+
+		//linking to each other
+		assert(pH->vertex() == varr[2]);
+		pH->he_next() = h1;
+		pH->he_prev() = h2;
+		h1->he_next() = h2;
+		h1->he_prev() = pH;
+		h2->he_next() = pH;
+		h2->he_prev() = h1;
+
+		//linking to face
+		h1->face() = f;
+		h2->face() = f;
+		pH->face() = f;
+
+		//connecting with edge
+		E * e = create_edge_2d(varr[2], varr[0]);
+		if (e->halfedge(0) == NULL)
+		{
+			e->halfedge(0) = h1;
+		}
+		else
+		{
+			assert(e->halfedge(1) == NULL);
+			e->halfedge(1) = h1;
+		}
+		h1->edge() = e;
+
+		E * e2 = create_edge_2d(varr[0], varr[1]);
+		if (e2->halfedge(0) == NULL)
+		{
+			e2->halfedge(0) = h2;
+		}
+		else
+		{
+			assert(e2->halfedge(1) == NULL);
+			e2->halfedge(1) = h2;
+		}
+		h2->edge() = e2;
+
+		f->halfedge() = pH;
+		return f;
+	}
+
+	template<typename V, typename E, typename F, typename H>
+	void MyMesh<V, E, F, H>::test()
+	{
+		//std::cout << triangle_space(v4, v1, v2) << std::endl;
+		//std::cout << triangle_space(v4, v2, v4) << std::endl;
+		/*F * pF = (F *)idFace(1);
+		std::cout << barycentric_coordinate((H *)pF->halfedge(), v4) << std::endl;
+		std::cout << barycentric_coordinate((H *)pF->halfedge()->he_next(), v4) << std::endl;
+		std::cout << barycentric_coordinate((H *)pF->halfedge()->he_prev(), v4) << std::endl;*/
+		for (auto it = m_faces.begin(); it != m_faces.end(); ++it)
+		{
+			F * pF = *it;
+			std::cout << "face id" << pF->id()<<"halfedge"<<pF->halfedge()->source()->id()<<' '<<pF->halfedge()->target()->id() << std::endl;
+
+		}
+		for (auto ite = m_edges.begin(); ite != m_edges.end(); ++ite)
+		{
+			E * pE = *ite;
+			if (pE->halfedge(0) != NULL)
+				std::cout << "edge id " << pE->id() << "halfedge 0: " << pE->halfedge(0)->source()->id() << ' ' << pE->halfedge(0)->target()->id() << std::endl;
+			if (pE->halfedge(1) != NULL)
+				std::cout << "edge id " << pE->id() << "halfedge 1: " << pE->halfedge(1)->source()->id() << ' ' << pE->halfedge(1)->target()->id() << std::endl;
+		}
+
+	}
+
+	/*
+	low efficiency
+	use it with care
+	*/
+	template<typename V, typename E, typename F, typename H>
+	E * MyMesh<V, E, F, H>::edgeExist(V * v1, V * v2)
+	{
+		for (auto it = m_edges.begin(); it != m_edges.end(); ++it)
+		{
+			E * pE = *it;
+			if (pE->halfedge(1) != NULL)
+			{
+				if (pE->halfedge(1)->source() == v1 && pE->halfedge(1)->target() == v2 || pE->halfedge(1)->target() == v1 && pE->halfedge(1)->source() == v2)
+					return pE;
+				else if (pE->halfedge(0)->source() == v1 && pE->halfedge(0)->target() == v2 || pE->halfedge(0)->target() == v1 && pE->halfedge(0)->source() == v2)
+					return pE;
+			}
+			else if (pE->halfedge(0) != NULL)
+			{
+				if (pE->halfedge(0)->source() == v1 && pE->halfedge(0)->target() == v2 || pE->halfedge(0)->target() == v1 && pE->halfedge(0)->source() == v2)
+					return pE;
+			}
+			else
+				continue;
+		}
+		return NULL;
+	}
 }
 
 

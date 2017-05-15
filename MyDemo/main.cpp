@@ -447,6 +447,9 @@ void draw_2d_mesh()
 {
 	glClear(GL_COLOR_BUFFER_BIT);
 
+	int multiply = 50;
+	int windowWidth = 200;
+	int windowHeight = 100;
 	//设置当前绘图使用的颜色
 	glColor3f(0.0f, 0.0f, 0.0f);
 	for (CMyMesh::MeshEdgeIterator meiter(&mesh); !meiter.end(); ++meiter)
@@ -457,8 +460,8 @@ void draw_2d_mesh()
 		GLfloat curSizeLine = 5;
 		glLineWidth(curSizeLine);
 		glBegin(GL_LINES);
-		glVertex3f(p1[0], p1[1], 0.0f);
-		glVertex3f(p2[0], p2[1], 0.0f);
+		glVertex3f(p1[0] * multiply + windowWidth, p1[1] * multiply + windowHeight, 0.0f);
+		glVertex3f(p2[0] * multiply + windowWidth, p2[1] * multiply + windowHeight, 0.0f);
 		glEnd();
 	}
 	glFlush();
@@ -468,9 +471,9 @@ void init_openGL_2d(int argc, char * argv[])
 {
 	glutInit(&argc, argv);                /* Initialize GLUT */
 	glutInitDisplayMode(GLUT_RGB | GLUT_SINGLE | GLUT_DEPTH);
-	glutInitWindowSize(800, 600);
+	glutInitWindowSize(1000, 1000);
 	glutCreateWindow("Mesh Viewer");	  /* Create window with given title */
-	glViewport(0, 0, 800, 600);
+	glViewport(0, 0, 1000, 1000);
 	glutDisplayFunc(draw_2d_mesh);
 	glutReshapeFunc(reshape_2d);
 
@@ -509,7 +512,9 @@ int main(int argc, char * argv[])
 	//mesh.test_iterator();
 	//mesh.verify_gauss_bonnet();
 	mesh.init_mesh();
-	mesh.generate_mesh(50);
+	mesh.generate_mesh(10);
+	mesh.test();
 	init_openGL_2d(argc, argv);
+	
 	return 0;
 }
